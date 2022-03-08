@@ -1,4 +1,4 @@
-# operator-template
+# Charmed OpenSearch Operator
 
 ## Description
 
