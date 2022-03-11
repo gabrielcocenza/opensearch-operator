@@ -66,4 +66,4 @@ juju deploy ./template-operator_ubuntu-20.04-amd64.charm \
 
 <!-- TEMPLATE-TODO: Update the description with the name of charm-->
 
-Canonical welcomes contributions to the Charmed Template Operator. Please check out our [contributor agreement](https://ubuntu.com/legal/contributors) if you're interested in contributing to the solution.
+Canonical welcomes contributions to the Charmed OpenSearch Operator. Please check out our [contributor agreement](https://ubuntu.com/legal/contributors) if you're interested in contributing to the solution.

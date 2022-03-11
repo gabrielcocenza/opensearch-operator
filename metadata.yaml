@@ -13,7 +13,31 @@ summary: |
   A OpenSearch operator charm
 series:
   - focal
-
 peers:
   opensearch:
     interface: opensearch-node
+provides:
+  client:
+    # this interface is used on graylog and we might want change the
+    # name for supporting a interface for both elasticsearch and opensearch
+    interface: elasticsearch
+resources:
+  tls_ca:
+    type: file
+    description: |
+      base64-encoded self-signed certificate for the root CA. This is only
+      required if the charm is not relating with a CA like Vault or EasyRSA.
+    filename: root-ca.pem
+  tls_key:
+    type: file
+    description: |
+      base64-encoded TLS key private used to generate tls_ca. Key should be
+      with at least 2048 of length to be secure. This key will be used to generate
+      certificates for opensearch nodes.
+    filename: root-ca-key.pem
+  admin_key:
+    type: file
+    description: |
+      base64-encoded Admin private key to generate the Admin certificate.
+    filename: admin-key.pem
+

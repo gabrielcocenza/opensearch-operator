@@ -1,3 +1,8 @@
+###############################################################################
+# [ WARNING ]
+# Configuration file maintained by Juju. Local changes may be overwritten.
+###############################################################################
+
 # ======================== OpenSearch Configuration =========================
 #
 # NOTE: OpenSearch comes with reasonable defaults for most settings.

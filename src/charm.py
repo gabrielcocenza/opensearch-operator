@@ -6,14 +6,14 @@
 import logging
 from pathlib import Path
 from subprocess import CalledProcessError, check_call
+from tokenize import Name
 from typing import Any, Dict, List, Optional
 
-import ops.charm
 from jinja2 import Environment, FileSystemLoader
-from ops.charm import CharmBase
+from ops.charm import CharmBase, RelationEvent, RelationJoinedEvent
 from ops.framework import StoredState
 from ops.main import main
-from ops.model import Relation
+from ops.model import BlockedStatus, ModelError, Relation
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +39,10 @@ class OpenSearchCharm(CharmBase):
         super().__init__(*args)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(
-            self.on.opensearch_relation_changed, self._opensearch_relation_joined
+            self.on.opensearch_relation_changed, self._opensearch_relation_changed
         )
+        self.framework.observe(self.on.client_relation_joined, self._client_relation_handler)
+        self.framework.observe(self.on.client_relation_changed, self._client_relation_handler)
 
     @property
     def _peers(self) -> Optional[Relation]:
@@ -64,13 +66,23 @@ class OpenSearchCharm(CharmBase):
         ]
 
         logger.debug(f"peer addresses: {peer_addresses}")
-        self_address = str(self.model.get_binding(PEER).network.bind_address)
+        self_address = self._unit_ip
         logger.debug(f"unit address: {self_address}")
         addresses = []
         if peer_addresses:
             addresses.extend(peer_addresses)
         addresses.append(self_address)
         return addresses
+
+    @property
+    def _unit_ip(self) -> str:
+        """Retrieve IP addresses associated with OpenSearch unit.
+
+        Returns:
+            str: IP address of the unit
+        """
+
+        return str(self.model.get_binding(PEER).network.bind_address)
 
     def _get_context(self) -> Dict[str, Any]:
         """Get variables context necessary to render configuration templates.
@@ -81,15 +93,15 @@ class OpenSearchCharm(CharmBase):
         """
         context = dict(self.model.config)
         context["unit_ips"] = self._unit_ips
-        context["network_host"] = self._unit_ips[-1]
+        context["network_host"] = self._unit_ip
         context["node_name"] = self.unit.name
 
         return context
 
     def _on_config_changed(self, _):
         """Render templates for configuration."""
+        self._security()
         context = self._get_context()
-        logger.info(f"CONFIG: {self.model.config}")
         for template in CONFIG_MAP.keys():
             config_path = CONFIG_MAP[template].get("config_path")
             cmd = CONFIG_MAP[template].get("cmd")
@@ -101,6 +113,17 @@ class OpenSearchCharm(CharmBase):
                 except CalledProcessError as e:
                     logger.exception(f"Failed to run command {cmd}: {e}")
                     raise
+
+        # update client relation data
+        client_relation = self.model.get_relation("client")
+        if client_relation:
+            logger.info("Updating `client` relation data.")
+            client_relation.data[self.unit].update(
+                {
+                    "cluster_name": self.model.config.get("cluster_name"),
+                    "port": "9200",
+                }
+            )
 
     def _write_config(
         self,
@@ -127,16 +150,45 @@ class OpenSearchCharm(CharmBase):
         target.write_text(rendered_template.render(context))
         target.chmod(chmod)
 
-    def _opensearch_relation_joined(self, event: ops.charm.RelationEvent) -> None:
+    def _opensearch_relation_changed(self, event: RelationEvent) -> None:
         """Add unit to the cluster by configuring the file opensearch.yml.
 
         Args:
-            event (ops.charm.RelationEvent): The triggering relation joined event.
+            event (RelationEvent): The triggering relation changed event.
         """
         context = self._get_context()
         config_path = CONFIG_MAP["opensearch.yml"].get("config_path")
         chmod = CONFIG_MAP["opensearch.yml"].get("chmod")
         self._write_config(config_path, "opensearch.yml", context, chmod)
+
+    def _client_relation_handler(self, event: RelationJoinedEvent) -> None:
+        """Set the cluster name and port through the relation.
+
+        Args:
+            event (RelationJoinedEvent): The triggering relation joined event.
+        """
+        event.relation.data[self.unit].update(
+            {
+                "cluster_name": self.model.config.get("cluster_name"),
+                "port": "9200",
+            }
+        )
+
+    def _security(self):
+        resources = ["tls_ca", "tls_key", "admin_key"]
+        try:
+            resources_path = [self.model.resources.fetch(resource) for resource in resources]
+        except NameError as e:
+            self.unit.status = BlockedStatus(f"Missing resource: {e}")
+            return
+
+        # copy the files to the config path
+        for resource_path in resources_path:
+            target = Path(CONFIG_PATH) / resource_path.name
+            if not target.exists():
+                target.write_text(resource_path.open().read())
+
+        # generate node certificate
 
 
 if __name__ == "__main__":
